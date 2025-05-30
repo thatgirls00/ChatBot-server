@@ -2,7 +2,7 @@ package org.example.chatbot.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.example.chatbot.domain.ScholarshipNotice;
-import org.example.chatbot.repository.ScholarshipNoticeRepository;
+import org.example.chatbot.service.ScholarshipNoticeService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,25 +13,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ScholarshipNoticeController {
 
-    private final ScholarshipNoticeRepository repository;
+    private final ScholarshipNoticeService service;
 
     @GetMapping("/search")
     public ResponseEntity<List<ScholarshipNotice>> searchNotices(
             @RequestParam(required = false) String date,
             @RequestParam(required = false) String title) {
 
-        List<ScholarshipNotice> result;
-
-        if (date != null && title != null) {
-            result = repository.findByNoticeDateContainingAndTitleContaining(date, title);
-        } else if (date != null) {
-            result = repository.findByNoticeDateContaining(date);
-        } else if (title != null) {
-            result = repository.findByTitleContaining(title);
-        } else {
-            result = repository.findAll();
-        }
-
+        List<ScholarshipNotice> result = service.searchNotices(date, title);
         return ResponseEntity.ok(result);
     }
 }

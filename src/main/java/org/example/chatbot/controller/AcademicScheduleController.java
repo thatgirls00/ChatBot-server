@@ -2,7 +2,7 @@ package org.example.chatbot.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.example.chatbot.domain.AcademicSchedule;
-import org.example.chatbot.repository.AcademicScheduleRepository;
+import org.example.chatbot.service.AcademicScheduleService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,25 +13,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AcademicScheduleController {
 
-    private final AcademicScheduleRepository repository;
+    private final AcademicScheduleService service;
 
     @GetMapping("/search")
     public ResponseEntity<List<AcademicSchedule>> searchSchedules(
             @RequestParam(required = false) String date,
             @RequestParam(required = false) String keyword) {
 
-        List<AcademicSchedule> result;
-
-        if (date != null && keyword != null) {
-            result = repository.findByDateContainingAndContentContaining(date, keyword);
-        } else if (date != null) {
-            result = repository.findByDateContaining(date);
-        } else if (keyword != null) {
-            result = repository.findByContentContaining(keyword);
-        } else {
-            result = repository.findAll();
-        }
-
+        List<AcademicSchedule> result = service.searchSchedules(date, keyword);
         return ResponseEntity.ok(result);
     }
 }
