@@ -20,7 +20,12 @@ public class FacultyMealController {
             @RequestParam(required = false) String date,
             @RequestParam(required = false) String keyword) {
 
-        List<FacultyMeal> result = service.searchMeals(date, keyword);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(service.search(date, keyword));
+    }
+
+    @PostMapping("/clear-cache")
+    public ResponseEntity<Void> clearCache() {
+        service.clearCache();
+        return ResponseEntity.ok().build();
     }
 }

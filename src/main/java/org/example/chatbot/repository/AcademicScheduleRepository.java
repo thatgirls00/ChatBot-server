@@ -8,7 +8,10 @@ import java.util.List;
 
 @Repository
 public interface AcademicScheduleRepository extends JpaRepository<AcademicSchedule, Long> {
+
     List<AcademicSchedule> findByDateContainingAndContentContaining(String date, String keyword);
+
     List<AcademicSchedule> findByDateContaining(String date);
+
     List<AcademicSchedule> findByContentContaining(String keyword);
 }

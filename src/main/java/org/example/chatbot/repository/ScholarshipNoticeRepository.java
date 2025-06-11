@@ -8,7 +8,10 @@ import java.util.List;
 
 @Repository
 public interface ScholarshipNoticeRepository extends JpaRepository<ScholarshipNotice, Long> {
+
     List<ScholarshipNotice> findByNoticeDateContainingAndTitleContaining(String date, String title);
+
     List<ScholarshipNotice> findByNoticeDateContaining(String date);
+
     List<ScholarshipNotice> findByTitleContaining(String title);
 }

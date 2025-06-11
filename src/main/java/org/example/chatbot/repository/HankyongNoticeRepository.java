@@ -8,7 +8,10 @@ import java.util.List;
 
 @Repository
 public interface HankyongNoticeRepository extends JpaRepository<HankyongNotice, Long> {
+
     List<HankyongNotice> findByNoticeDateContainingAndTitleContaining(String date, String title);
+
     List<HankyongNotice> findByNoticeDateContaining(String date);
+
     List<HankyongNotice> findByTitleContaining(String title);
 }

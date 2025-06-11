@@ -3,25 +3,45 @@ package org.example.chatbot.service;
 import lombok.RequiredArgsConstructor;
 import org.example.chatbot.domain.FacultyMeal;
 import org.example.chatbot.repository.FacultyMealRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
-public class FacultyMealService {
+public class FacultyMealService extends AbstractSearchService<FacultyMeal> {
 
     private final FacultyMealRepository repository;
 
-    public List<FacultyMeal> searchMeals(String date, String keyword) {
-        if (date != null && keyword != null) {
-            return repository.findByMealDateContainingAndMenuContaining(date, keyword);
-        } else if (date != null) {
-            return repository.findByMealDateContaining(date);
-        } else if (keyword != null) {
-            return repository.findByMenuContaining(keyword);
-        } else {
-            return repository.findAll();
-        }
+    @Override
+    @Cacheable(value = "facultyMeals", key = "{#date, #keyword}")
+    public List<FacultyMeal> search(String date, String keyword) {
+        return super.search(date, keyword);
+    }
+
+    @CacheEvict(value = "facultyMeals", allEntries = true)
+    public void clearCache() {
+    }
+
+    @Override
+    protected List<FacultyMeal> findByDateAndKeyword(String date, String keyword) {
+        return repository.findByMealDateContainingAndMenuContaining(date, keyword);
+    }
+
+    @Override
+    protected List<FacultyMeal> findByDate(String date) {
+        return repository.findByMealDateContaining(date);
+    }
+
+    @Override
+    protected List<FacultyMeal> findByKeyword(String keyword) {
+        return repository.findByMenuContaining(keyword);
+    }
+
+    @Override
+    protected List<FacultyMeal> findAll() {
+        return repository.findAll();
     }
 }

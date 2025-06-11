@@ -18,9 +18,14 @@ public class HankyongNoticeController {
     @GetMapping("/search")
     public ResponseEntity<List<HankyongNotice>> searchNotices(
             @RequestParam(required = false) String date,
-            @RequestParam(required = false) String title) {
+            @RequestParam(required = false) String keyword) {
 
-        List<HankyongNotice> result = service.searchNotices(date, title);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(service.search(date, keyword));
+    }
+
+    @PostMapping("/clear-cache")
+    public ResponseEntity<Void> clearCache() {
+        service.clearCache();
+        return ResponseEntity.ok().build();
     }
 }

@@ -8,7 +8,10 @@ import java.util.List;
 
 @Repository
 public interface FacultyMealRepository extends JpaRepository<FacultyMeal, Long> {
+
     List<FacultyMeal> findByMealDateContainingAndMenuContaining(String mealDate, String keyword);
+
     List<FacultyMeal> findByMealDateContaining(String mealDate);
+
     List<FacultyMeal> findByMenuContaining(String keyword);
 }
