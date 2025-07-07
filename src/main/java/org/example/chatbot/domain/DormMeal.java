@@ -27,4 +27,7 @@ public class DormMeal implements Serializable {
 
     @Column(length = 64, unique = true)
     private String hash;
+
+    @Column(name = "formatted_menu", columnDefinition = "TEXT")
+    private String formattedMenu;
 }

@@ -18,6 +18,7 @@ public class AcademicSchedule implements Serializable {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "date")
     private String date;
 
     @Column(columnDefinition = "MEDIUMTEXT")

@@ -14,4 +14,6 @@ public interface AcademicScheduleRepository extends JpaRepository<AcademicSchedu
     List<AcademicSchedule> findByDateContaining(String date);
 
     List<AcademicSchedule> findByContentContaining(String keyword);
+
+    List<AcademicSchedule> findAll();
 }
