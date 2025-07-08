@@ -202,6 +202,15 @@ public class TableQueryService {
         Set<String> matchedSchedules = new LinkedHashSet<>();
         boolean foundDateInRange = false;
 
+        // 연/월만 있을 경우 대비: 기본값 보정
+        if (startDate == null && endDate == null && !dateFilterApplied) {
+            log.warn("📆 날짜 필터 없음 → 현재 월 전체로 보정합니다.");
+            LocalDate now = LocalDate.now();
+            startDate = now.withDayOfMonth(1);
+            endDate = now.withDayOfMonth(now.lengthOfMonth());
+            dateFilterApplied = true;
+        }
+
         int baseYear = (startDate != null) ? startDate.getYear() : LocalDate.now().getYear();
 
         for (Object data : dataList) {
@@ -209,7 +218,7 @@ public class TableQueryService {
             String content = schedule.getContent();
             if (content == null || content.isBlank()) continue;
 
-            // ✅ 키워드 필터 우선 적용
+            // 키워드 필터 우선 적용
             if (hasKeyword && !content.contains(keyword)) continue;
 
             LocalDate[] scheduleRange = extractScheduleDateRange(content, baseYear);

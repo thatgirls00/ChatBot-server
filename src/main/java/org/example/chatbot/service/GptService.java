@@ -36,9 +36,6 @@ public class GptService {
             "식당 미지정"
     );
 
-    /**
-     * 사용자 질문에서 intent, date, mealTime, keyword를 GPT로부터 JSON 형태로 받아 파싱.
-     */
     public IntentResultDto classifyIntent(String userInput) {
         String prompt = GptPromptBuilder.buildIntentAndKeywordPrompt(userInput);
         String rawContent = sendToGpt(prompt);
@@ -55,25 +52,23 @@ public class GptService {
 
             JsonNode root = objectMapper.readTree(content);
 
-            String intent   = root.has("intent") ? root.get("intent").asText(null) : null;
-            String date     = root.has("date") ? root.get("date").asText(null) : null;
-            String mealTime = root.has("mealTime") ? root.get("mealTime").asText(null) : null;
-            String keyword  = root.has("keyword") ? root.get("keyword").asText(null) : null;
+            String intent    = root.has("intent") ? root.get("intent").asText(null) : null;
+            String rawDate   = root.has("date") ? root.get("date").asText(null) : null;
+            String date      = correctToCurrentYear(rawDate);
+            String mealTime  = root.has("mealTime") ? root.get("mealTime").asText(null) : null;
+            String keyword   = root.has("keyword") ? root.get("keyword").asText(null) : null;
 
             if (userInput.contains("일정")) {
                 log.error("📥 질문에 '일정' 키워드 감지, intent를 '학사일정'으로 강제 지정합니다.");
                 return new IntentResultDto("학사일정", date, keyword, mealTime, null);
             }
 
-            // GPT가 intent를 못 잡거나 유효하지 않은 intent를 반환하면 직접 보정
             if ((intent == null || !VALID_INTENTS.contains(intent))) {
-                // 질문에 "식당" 키워드가 있으면 식당 intent로 유도
                 if (userInput.contains("식당")) {
                     log.error("📥 식당 키워드 기반으로 intent를 '식당 미지정'으로 보정합니다.");
                     return new IntentResultDto("식당 미지정", null, null, null,
                             "어느 식당의 식단이 궁금하신가요? 학생식당, 교직원식당, 기숙사식당 중 선택해 주세요.");
                 }
-                // VALID_INTENTS에 속하지 않으면 fallback
                 return new IntentResultDto("없음", null, null, null, null);
             }
 
@@ -95,17 +90,11 @@ public class GptService {
         return new IntentResultDto("없음", null, null, null, content);
     }
 
-    /**
-     * intent가 "없음"일 때 친화적인 fallback 답변 생성.
-     */
     public String generateFallbackAnswer(String userInput) {
         String prompt = GptPromptBuilder.buildFallbackPrompt(userInput);
         return sendToGpt(prompt);
     }
 
-    /**
-     * 기숙사 식단 메뉴 원본을 사람이 읽기 좋게 포맷팅.
-     */
     public String formatMealWithGpt(String rawMenu) {
         String prompt = String.format(
                 """
@@ -129,9 +118,6 @@ public class GptService {
         return sendToGpt(prompt).trim();
     }
 
-    /**
-     * GPT API에 요청을 보내고 응답을 받음.
-     */
     private String sendToGpt(String prompt) {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(apiKey);
@@ -155,9 +141,6 @@ public class GptService {
         }
     }
 
-    /**
-     * GPT 응답 JSON에서 메시지 content를 꺼냄.
-     */
     @SuppressWarnings("unchecked")
     private String extractContentFromResponse(ResponseEntity<Map> response) {
         List<Map<String, Object>> choices = (List<Map<String, Object>>) response.getBody().get("choices");
@@ -165,10 +148,48 @@ public class GptService {
         return message.get("content").toString().trim();
     }
 
-    /**
-     * GPT 응답 문자열에 포함될 수 있는 BOM, 제어문자, 불필요한 공백 제거.
-     */
     private String sanitizeGptResponse(String content) {
         return content.replaceAll("[\\u0000-\\u001F\\u007F\\uFEFF-\\uFFFF]", "").trim();
+    }
+
+    /**
+     * GPT가 반환한 date 문자열이 과거 연도이면 현재 연도로 보정
+     */
+    private String correctToCurrentYear(String dateStr) {
+        if (dateStr == null) return null;
+        int currentYear = Calendar.getInstance().get(Calendar.YEAR);
+
+        try {
+            // YYYY
+            if (dateStr.matches("^\\d{4}$")) {
+                int year = Integer.parseInt(dateStr);
+                if (year < currentYear) {
+                    log.warn("📌 연도 보정: '{}' → '{}'", dateStr, currentYear);
+                    return String.valueOf(currentYear);
+                }
+            }
+            // YYYY-MM
+            else if (dateStr.matches("^\\d{4}-\\d{2}$")) {
+                int year = Integer.parseInt(dateStr.substring(0, 4));
+                if (year < currentYear) {
+                    String corrected = currentYear + dateStr.substring(4);
+                    log.warn("📌 연도 보정: '{}' → '{}'", dateStr, corrected);
+                    return corrected;
+                }
+            }
+            // YYYY-MM-DD
+            else if (dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+                int year = Integer.parseInt(dateStr.substring(0, 4));
+                if (year < currentYear) {
+                    String corrected = currentYear + dateStr.substring(4);
+                    log.warn("📌 연도 보정: '{}' → '{}'", dateStr, corrected);
+                    return corrected;
+                }
+            }
+        } catch (Exception e) {
+            log.error("❗ 연도 보정 실패: {}, 이유: {}", dateStr, e.getMessage());
+        }
+
+        return dateStr;
     }
 }
