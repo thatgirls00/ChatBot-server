@@ -202,34 +202,63 @@ public class TableQueryService {
         Set<String> matchedSchedules = new LinkedHashSet<>();
         boolean foundDateInRange = false;
 
+        int baseYear = (startDate != null) ? startDate.getYear() : LocalDate.now().getYear();
+
         for (Object data : dataList) {
             if (!(data instanceof AcademicSchedule schedule)) continue;
             String content = schedule.getContent();
             if (content == null || content.isBlank()) continue;
 
-            LocalDate[] scheduleRange = extractScheduleDateRange(content, startDate.getYear());
+            // ✅ 키워드 필터 우선 적용
+            if (hasKeyword && !content.contains(keyword)) continue;
+
+            LocalDate[] scheduleRange = extractScheduleDateRange(content, baseYear);
             if (scheduleRange == null) continue;
 
             LocalDate scheduleStart = scheduleRange[0], scheduleEnd = scheduleRange[1];
-            boolean isOverlap = !scheduleStart.isAfter(endDate) && !scheduleEnd.isBefore(startDate);
+            boolean isOverlap = (startDate == null || !scheduleStart.isAfter(endDate)) &&
+                    (endDate == null || !scheduleEnd.isBefore(startDate));
 
-            if (isOverlap) {
-                foundDateInRange = true;
-                if (dateFilterApplied && hasKeyword && !content.contains(keyword)) continue;
+            if (!dateFilterApplied || isOverlap) {
+                if (isOverlap) foundDateInRange = true;
                 matchedSchedules.add(String.format("[%s ~ %s] %s", scheduleStart, scheduleEnd, content));
             }
         }
 
-        if (!matchedSchedules.isEmpty()) return String.join("\n\n", matchedSchedules);
+        if (!matchedSchedules.isEmpty()) {
+            return String.join("\n\n", matchedSchedules);
+        }
 
-        if (dateFilterApplied && hasKeyword) {
-            String otherDate = findKeywordInOtherDates(keyword, startDate, endDate);
-            if (!otherDate.isBlank()) {
-                return String.format(
-                        "요청하신 기간에는 '%s' 키워드 일정이 없지만, %s에 같은 일정이 있습니다.", keyword, otherDate);
+        // 키워드만 있고 날짜 필터가 없을 경우 별도 처리 (중복 방지 위해 별도 Set 사용)
+        if (!dateFilterApplied && hasKeyword) {
+            Set<String> keywordOnlyMatches = new LinkedHashSet<>();
+            for (Object data : dataList) {
+                if (!(data instanceof AcademicSchedule schedule)) continue;
+                String content = schedule.getContent();
+                if (content == null || content.isBlank()) continue;
+                if (!content.contains(keyword)) continue;
+
+                LocalDate[] scheduleRange = extractScheduleDateRange(content, LocalDate.now().getYear());
+                if (scheduleRange == null) continue;
+
+                keywordOnlyMatches.add(String.format("[%s ~ %s] %s", scheduleRange[0], scheduleRange[1], content));
+            }
+
+            if (!keywordOnlyMatches.isEmpty()) {
+                return String.format("'%s' 키워드로 찾은 학사일정입니다:\n\n%s",
+                        keyword, String.join("\n\n", keywordOnlyMatches));
             }
         }
 
+        // fallback: keyword는 있지만 해당 날짜 범위에 없을 때
+        if (dateFilterApplied && hasKeyword) {
+            String otherDate = findKeywordInOtherDates(keyword, startDate, endDate);
+            if (!otherDate.isBlank()) {
+                return String.format("요청하신 기간에는 '%s' 키워드 일정이 없지만, %s에 같은 일정이 있습니다.", keyword, otherDate);
+            }
+        }
+
+        // 날짜 기반 응답
         if (dateFilterApplied) {
             if (!foundDateInRange) {
                 return String.format("요청하신 기간(%s ~ %s)에는 학사일정이 없어요. 다른 기간으로 다시 질문해 보시겠어요?", startDate, endDate);
@@ -245,21 +274,35 @@ public class TableQueryService {
 
     public String findKeywordInOtherDates(String keyword, LocalDate startDate, LocalDate endDate) {
         List<AcademicSchedule> schedules = academicScheduleRepository.findByContentContaining(keyword);
+        int currentYear = LocalDate.now().getYear();
+        List<String> otherMatches = new ArrayList<>();
 
         for (AcademicSchedule schedule : schedules) {
             String content = schedule.getContent();
             if (content == null || content.isBlank()) continue;
 
-            LocalDate[] scheduleRange = extractScheduleDateRange(content, startDate.getYear());
+            LocalDate[] scheduleRange = extractScheduleDateRange(content, currentYear);
             if (scheduleRange == null) continue;
 
-            LocalDate scheduleStart = scheduleRange[0], scheduleEnd = scheduleRange[1];
+            LocalDate scheduleStart = scheduleRange[0];
+            LocalDate scheduleEnd = scheduleRange[1];
 
-            boolean isOutsideRequestedPeriod = scheduleEnd.isBefore(startDate) || scheduleStart.isAfter(endDate);
-            if (isOutsideRequestedPeriod) {
-                return String.format("%s ~ %s", scheduleStart, scheduleEnd);
+            // 날짜가 지정된 경우: 요청 기간 외의 일정만 수집
+            if (startDate != null && endDate != null) {
+                boolean isOutsideRequestedPeriod = scheduleEnd.isBefore(startDate) || scheduleStart.isAfter(endDate);
+                if (isOutsideRequestedPeriod) {
+                    otherMatches.add(String.format("[%s ~ %s] %s", scheduleStart, scheduleEnd, content));
+                }
+            } else {
+                // 날짜 지정이 없는 경우: 향후 일정만 수집
+                if (scheduleEnd.isAfter(LocalDate.now())) {
+                    otherMatches.add(String.format("[%s ~ %s] %s", scheduleStart, scheduleEnd, content));
+                }
             }
         }
-        return "";
+
+        if (otherMatches.isEmpty()) return "";
+
+        return String.format("다른 기간에 '%s' 키워드와 관련된 일정이 있어요:\n\n%s", keyword, String.join("\n\n", otherMatches));
     }
 }

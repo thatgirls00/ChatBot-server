@@ -31,6 +31,24 @@ public class GptController {
     private static final Set<String> NOTICE_INTENTS = Set.of("학사공지", "장학공지", "한경공지");
     private static final String SCHEDULE_INTENT = "학사일정";
 
+    @GetMapping("/intent")
+    public ResponseEntity<GptResponseDto> getSession(@RequestParam("userId") String userId) {
+        String lastIntent = chatSessionService.getLastIntent(userId);
+        String lastDate = chatSessionService.getLastDate(userId);
+        String lastKeyword = chatSessionService.getLastKeyword(userId);
+        String lastMealTime = chatSessionService.getLastMealTime(userId);
+
+        if (lastIntent == null) {
+            return ResponseEntity.ok(new GptResponseDto(
+                    null,
+                    "안녕하세요! 한경국립대학교 챗봇입니다. \n학사공지, 학사일정, 식단 등을 편하게 물어보세요. 예: '7월 학사일정 알려줘', '오늘 기숙사식당 메뉴 알려줘' 등"
+            ));
+        }
+
+        String summary = String.format("이전에 '%s' 관련 질문을 하셨습니다. 이어서 질문해 보세요.", lastIntent);
+        return ResponseEntity.ok(new GptResponseDto(lastIntent, summary));
+    }
+
     @PostMapping("/intent")
     public ResponseEntity<GptResponseDto> handleUserInput(@RequestBody GptRequestDto request) {
         String userInput = request.getMessage();
@@ -61,6 +79,12 @@ public class GptController {
             endDate = dateRange[1];
         }
 
+        // 이 아래에 null fallback 처리 추가
+        if (startDate == null || endDate == null) {
+            startDate = LocalDate.now();
+            endDate = LocalDate.now();
+        }
+
         boolean dateFilterApplied = !(startDate.equals(endDate) && startDate.equals(LocalDate.now()));
         if (containsDateKeyword(userInput)) dateFilterApplied = true;
 
@@ -82,7 +106,7 @@ public class GptController {
         String normalizedIntent = intent != null ? intent.trim() : "";
 
         // intent가 비어있으면 Redis에서 복원
-        if (normalizedIntent.isEmpty()) {
+        if (normalizedIntent.isEmpty() || "없음".equalsIgnoreCase(normalizedIntent)) {
             intent = chatSessionService.getLastIntent(userId);
             String savedDate = chatSessionService.getLastDate(userId);
             keyword = chatSessionService.getLastKeyword(userId);
@@ -166,14 +190,17 @@ public class GptController {
             response = new GptResponseDto(intent, noticeAnswer);
 
         } else if (SCHEDULE_INTENT.equals(intent)) {
+            keyword = normalizeKeyword(keyword); // 졸업/학위수여 동의어 처리
             List<?> dataList = tableQueryService.findNoticeDataByIntent(intent, null);
             String scheduleAnswer;
 
             if (keyword != null && !keyword.isBlank()) {
+                // keyword 우선 검색
                 scheduleAnswer = tableQueryService.filterAcademicScheduleByConditions(
-                        keyword, startDate, endDate, dateFilterApplied, dataList);
+                        keyword, null, null, false, dataList);
 
                 if (scheduleAnswer.isBlank()) {
+                    // fallback: 다른 날짜에 있을 경우 안내
                     String otherDate = tableQueryService.findKeywordInOtherDates(keyword, startDate, endDate);
                     if (!otherDate.isBlank()) {
                         scheduleAnswer = String.format(
@@ -184,13 +211,18 @@ public class GptController {
                     }
                 }
             } else if (dateFilterApplied) {
+                // keyword가 없을 경우 date 기반으로만 필터링
                 scheduleAnswer = tableQueryService.filterAcademicScheduleByConditions(
                         null, startDate, endDate, dateFilterApplied, dataList);
+                if (scheduleAnswer.isBlank()) {
+                    scheduleAnswer = "요청하신 기간에는 학사일정이 없습니다.";
+                }
             } else {
+                // keyword도 없고 날짜도 없을 때
                 scheduleAnswer = "어떤 학사일정을 찾으시나요? 예: 수강신청, 휴학 등 키워드를 입력해 주세요.";
             }
-            response = new GptResponseDto(intent, scheduleAnswer);
 
+            response = new GptResponseDto(intent, scheduleAnswer);
         } else {
             String fallback = gptService.generateFallbackAnswer(userInput);
             response = new GptResponseDto("없음", fallback);
@@ -209,5 +241,12 @@ public class GptController {
                 userInput.contains("이번 주") ||
                 userInput.contains("내일") ||
                 userInput.contains("모레");
+    }
+
+    private String normalizeKeyword(String keyword) {
+        if (keyword == null) return null;
+        if (keyword.contains("졸업")) return "학위수여";
+        if (keyword.contains("학위수여")) return "졸업";
+        return keyword;
     }
 }
