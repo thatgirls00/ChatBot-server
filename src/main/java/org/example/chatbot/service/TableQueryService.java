@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static org.example.chatbot.util.DateTimeExtractor.extractScheduleDateRange;
 
@@ -59,61 +60,124 @@ public class TableQueryService {
                                          boolean dateFilterApplied, List<?> dataList) {
         boolean hasKeyword = keyword != null && !keyword.isBlank();
         boolean keywordFound = false;
-        Set<String> matchedMenus = new LinkedHashSet<>();
         boolean foundDateInRange = false;
 
-        log.info("🔎 filterMealByConditions: mealTime={}, startDate={}, endDate={}", mealTime, startDate, endDate);
+        Map<String, List<String>> groupedMenus = new LinkedHashMap<>();
+
+        log.info("🔍 filterMealByConditions: mealTime={}, startDate={}, endDate={}", mealTime, startDate, endDate);
 
         for (Object data : dataList) {
-            String menu = null, dateStr = null, timeSlot = null;
+            String menu = null, dateStr = null;
 
             if (data instanceof DormMeal meal) {
                 menu = meal.getFormattedMenu() != null ? meal.getFormattedMenu() : meal.getMenu();
                 dateStr = meal.getMealDate();
-                timeSlot = "";
-            } else if (data instanceof StudentMeal meal) {
+                if (dateStr == null || dateStr.isBlank() || menu == null || menu.isBlank()) continue;
+
+                LocalDate mealDate = LocalDate.parse(dateStr);
+                if (!mealDate.isBefore(startDate) && !mealDate.isAfter(endDate)) {
+                    foundDateInRange = true;
+
+                    String extractedMenu = (mealTime != null && !mealTime.isBlank())
+                            ? extractMealSection(menu, mealTime)
+                            : menu;
+
+                    if (extractedMenu == null || extractedMenu.isBlank()) continue;
+                    if (hasKeyword && extractedMenu.contains(keyword)) keywordFound = true;
+                    else if (hasKeyword && !extractedMenu.contains(keyword)) continue;
+
+                    // [전체] 생략 조건 분기
+                    String formatted = (mealTime != null)
+                            ? String.format("[%s]\n%s", mealTime, extractedMenu)
+                            : extractedMenu;
+
+                    groupedMenus.computeIfAbsent(dateStr, k -> new ArrayList<>()).add(formatted);
+                }
+            }
+
+            else if (data instanceof StudentMeal meal) {
                 menu = meal.getMenu();
                 dateStr = meal.getMealDate();
-                timeSlot = meal.getMealTime();
-            } else if (data instanceof FacultyMeal meal) {
+                String studentMealTime = meal.getMealTime(); // ex: "건강한끼(11:30~13:30)"
+                if (menu == null || dateStr == null || studentMealTime == null) continue;
+
+                LocalDate mealDate = LocalDate.parse(dateStr);
+                if (!mealDate.isBefore(startDate) && !mealDate.isAfter(endDate)) {
+                    foundDateInRange = true;
+
+                    String timeLabel = extractTimeLabel(studentMealTime);  // "건강한끼" or "맛난한끼"
+                    String timeRange = extractTimeRange(studentMealTime);  // "11:30~13:30"
+
+                    // "점심"은 전체 포함, 특정 식단명을 지정한 경우만 필터링
+                    if (mealTime != null && !mealTime.isBlank() &&
+                            !mealTime.equals("점심") &&
+                            !normalizeKorean(timeLabel).equalsIgnoreCase(normalizeKorean(mealTime))) continue;
+
+                    // 조건: 학생식당이고 mealTime이 지정된 경우 -> 키워드 필터는 생략
+                    boolean skipKeywordCheck = "학생식당".equals(intent) && mealTime != null && !mealTime.equals("점심");
+
+                    if (hasKeyword && !skipKeywordCheck && !menu.contains(keyword)) continue;
+                    if (hasKeyword) keywordFound = true;
+
+                    String formatted = String.format("[%s] %s\n%s", timeLabel, timeRange,
+                            Arrays.stream(menu.split("\n")).map(s -> "- " + s).collect(Collectors.joining("\n")));
+
+                    groupedMenus.computeIfAbsent(dateStr, k -> new ArrayList<>()).add(formatted);
+                }
+            }
+
+            else if (data instanceof FacultyMeal meal) {
                 menu = meal.getMenu();
                 dateStr = meal.getMealDate();
-                timeSlot = meal.getMealTime();
-            } else continue;
+                String facultyMealTime = meal.getMealTime(); // ex: "점심(11:30~13:00)"
+                if (menu == null || dateStr == null || facultyMealTime == null) continue;
 
-            if (dateStr == null || dateStr.isBlank()) continue;
-            LocalDate mealDate = LocalDate.parse(dateStr);
+                LocalDate mealDate = LocalDate.parse(dateStr);
+                if (!mealDate.isBefore(startDate) && !mealDate.isAfter(endDate)) {
+                    foundDateInRange = true;
 
-            if (!mealDate.isBefore(startDate) && !mealDate.isAfter(endDate)) {
-                foundDateInRange = true;
-                if (menu == null || menu.isBlank() || "등록된 식단내용이(가) 없습니다.".equals(menu.trim())) continue;
+                    String timeLabel = extractTimeLabel(facultyMealTime);  // "점심"
+                    String timeRange = extractTimeRange(facultyMealTime);  // "11:30~13:00"
 
-                String extractedMenu = menu;
+                    if (mealTime != null && !mealTime.equals(timeLabel)) continue;
+                    if (hasKeyword && !menu.contains(keyword)) continue;
+                    if (hasKeyword) keywordFound = true;
 
-                if (mealTime != null && !mealTime.isBlank()) {
-                    extractedMenu = extractMealSection(menu, mealTime);
-                    if (extractedMenu == null) continue;
-                } else if (mealTime != null && !mealTime.equalsIgnoreCase(timeSlot)) {
-                    continue;
+                    String formatted = String.format("[%s] %s\n%s", timeLabel, timeRange,
+                            Arrays.stream(menu.split("\n")).map(s -> "- " + s).collect(Collectors.joining("\n")));
+
+                    groupedMenus.computeIfAbsent(dateStr, k -> new ArrayList<>()).add(formatted);
                 }
-
-                if (hasKeyword && extractedMenu.contains(keyword)) {
-                    keywordFound = true;
-                }
-
-                matchedMenus.add(String.format("[%s]\n%s", mealDate, extractedMenu));
             }
         }
 
-        if (!matchedMenus.isEmpty()) {
-            if (hasKeyword) {
-                if (keywordFound) {
-                    return String.format("네, '%s' 메뉴가 포함되어 있어요.\n\n%s", keyword, String.join("\n\n", matchedMenus));
+        if (!groupedMenus.isEmpty()) {
+            List<String> result = new ArrayList<>();
+            for (Map.Entry<String, List<String>> entry : groupedMenus.entrySet()) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("[").append(entry.getKey()).append("]\n");
+
+                // 중복 제거 + 빈 메뉴 제외
+                List<String> menus = entry.getValue().stream()
+                        .distinct()
+                        .filter(m -> !m.contains("등록된 식단내용이(가) 없습니다."))
+                        .collect(Collectors.toList());
+
+                if (menus.isEmpty()) {
+                    sb.append("- 등록된 식단내용이(가) 없습니다.");
                 } else {
-                    return String.format("아니요, '%s' 메뉴는 없습니다.\n\n%s", keyword, String.join("\n\n", matchedMenus));
+                    for (String menu : menus) {
+                        sb.append(menu).append("\n\n");
+                    }
                 }
+                result.add(sb.toString().trim());
             }
-            return String.join("\n\n", matchedMenus);
+
+            if (hasKeyword && !keywordFound) {
+                return "요청하신 조건에 맞는 식단을 찾지 못했어요.";
+            }
+
+            return String.join("\n\n", result);
         }
 
         if (dateFilterApplied) {
@@ -130,12 +194,13 @@ public class TableQueryService {
     }
 
     private String extractMealSection(String menu, String mealTime) {
+        if (menu == null || mealTime == null) return null;
         String marker = "[" + mealTime + "]";
         int start = menu.indexOf(marker);
         if (start == -1) return null;
         int nextMarker = menu.indexOf("[", start + marker.length());
         if (nextMarker == -1) nextMarker = menu.length();
-        return menu.substring(start, nextMarker).trim();
+        return menu.substring(start + marker.length(), nextMarker).trim();
     }
 
     public String filterNoticeByConditions(String keyword, LocalDate startDate, LocalDate endDate,
@@ -313,5 +378,21 @@ public class TableQueryService {
         if (otherMatches.isEmpty()) return "";
 
         return String.format("다른 기간에 '%s' 키워드와 관련된 일정이 있어요:\n\n%s", keyword, String.join("\n\n", otherMatches));
+    }
+
+    private String extractTimeLabel(String mealTime) {
+        // ex: "건강한끼(11:30~13:30)" → "건강한끼"
+        int idx = mealTime.indexOf('(');
+        return idx != -1 ? mealTime.substring(0, idx).trim() : mealTime.trim();
+    }
+
+    private String extractTimeRange(String mealTime) {
+        int start = mealTime.indexOf("(");
+        int end = mealTime.indexOf(")");
+        return (start != -1 && end != -1) ? mealTime.substring(start + 1, end).trim() : "";
+    }
+
+    private String normalizeKorean(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", "").replaceAll("\\u200B", "").trim();
     }
 }

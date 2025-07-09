@@ -58,28 +58,11 @@ public class GptController {
         String intent = result.getIntent();
         String keyword = result.getKeyword();
         String answer = result.getAnswer();
-        String dateStr = result.getDate();
 
-        LocalDate[] dateRange;
-        LocalDate startDate, endDate;
+        LocalDate[] dateRange = extractDateRange(userInput);
+        LocalDate startDate = dateRange[0];
+        LocalDate endDate = dateRange[1];
 
-        if (dateStr != null) {
-            if (dateStr.matches("\\d{4}-\\d{2}")) { // YYYY-MM 형태면 월 범위 보정
-                YearMonth ym = YearMonth.parse(dateStr);
-                startDate = ym.atDay(1);
-                endDate = ym.atEndOfMonth();
-            } else {
-                dateRange = extractDateRange(userInput);
-                startDate = dateRange[0];
-                endDate = dateRange[1];
-            }
-        } else {
-            dateRange = extractDateRange(userInput);
-            startDate = dateRange[0];
-            endDate = dateRange[1];
-        }
-
-        // 이 아래에 null fallback 처리 추가
         if (startDate == null || endDate == null) {
             startDate = LocalDate.now();
             endDate = LocalDate.now();
@@ -91,21 +74,26 @@ public class GptController {
         String mealTime = extractMealTime(userInput);
         if ("학생식당".equals(intent) && "점심".equals(mealTime)) mealTime = null;
 
-        // intent가 식당 미지정이면 → 식당 선택 재질문
+        if ((mealTime == null || mealTime.isBlank()) && "학생식당".equals(intent)) {
+            if (userInput.contains("건강한끼")) {
+                mealTime = "건강한끼";
+            } else if (userInput.contains("맛난한끼")) {
+                mealTime = "맛난한끼";
+            }
+        }
+
         if ("식당 미지정".equalsIgnoreCase(intent)) {
             return ResponseEntity.ok(new GptResponseDto(
                     "식당 미지정", "어느 식당의 식단이 궁금하신가요? 학생식당, 교직원식당, 기숙사식당 중 선택해 주세요."
             ));
         }
 
-        // GPT가 intent 없이 안내 메시지만 준 경우 → fallback
         if ((intent == null || intent.trim().isEmpty()) && answer != null) {
             return ResponseEntity.ok(new GptResponseDto(null, answer));
         }
 
         String normalizedIntent = intent != null ? intent.trim() : "";
 
-        // intent가 비어있으면 Redis에서 복원
         if (normalizedIntent.isEmpty() || "없음".equalsIgnoreCase(normalizedIntent)) {
             intent = chatSessionService.getLastIntent(userId);
             String savedDate = chatSessionService.getLastDate(userId);
@@ -124,21 +112,13 @@ public class GptController {
 
         normalizedIntent = intent.trim();
 
-        // intent가 식당 미지정인 경우 → 어느 식당인지 재질문
-        if ("식당 미지정".equalsIgnoreCase(normalizedIntent)) {
+        if ("식당 미지정".equalsIgnoreCase(normalizedIntent) ||
+                (intent != null && intent.contains("식당") && !MEAL_INTENTS.contains(intent))) {
             return ResponseEntity.ok(new GptResponseDto(
                     "식당 미지정", "어느 식당의 식단이 궁금하신가요? 학생식당, 교직원식당, 기숙사식당 중 선택해 주세요."
             ));
         }
 
-        // 식당 intent지만 명확하지 않으면 재질문
-        if (intent != null && intent.contains("식당") && !MEAL_INTENTS.contains(intent)) {
-            return ResponseEntity.ok(new GptResponseDto(
-                    "식당 미지정", "어느 식당의 식단이 궁금하신가요? 학생식당, 교직원식당, 기숙사식당 중 선택해 주세요."
-            ));
-        }
-
-        // intent가 없음 처리
         if ("없음".equalsIgnoreCase(normalizedIntent)) {
             if (userInput.contains("공지")) {
                 return ResponseEntity.ok(new GptResponseDto(
@@ -149,7 +129,6 @@ public class GptController {
             return ResponseEntity.ok(new GptResponseDto("없음", fallback));
         }
 
-        // 식당 intent 명확 → 날짜 확인
         if (MEAL_INTENTS.contains(intent)) {
             if (!dateFilterApplied) {
                 return ResponseEntity.ok(new GptResponseDto(
@@ -158,26 +137,22 @@ public class GptController {
             }
             List<?> dataList = tableQueryService.findMealDataByIntent(intent, keyword);
             String mealAnswer = tableQueryService.filterMealByConditions(
-                    intent, keyword, mealTime, startDate, endDate, dateFilterApplied, dataList);
+                    intent, keyword, mealTime, startDate, endDate, dateFilterApplied, dataList
+            );
             chatSessionService.saveSession(userId, intent, startDate.toString(), keyword, mealTime);
             return ResponseEntity.ok(new GptResponseDto(intent, mealAnswer));
         }
 
-        // 공지/일정 intent → 키워드 누락 시 재질문 포함
         if (NOTICE_INTENTS.contains(intent) || SCHEDULE_INTENT.equals(intent)) {
-            if ((keyword == null || keyword.isBlank())) {
-                if (dateFilterApplied) {
-                    System.out.println("키워드 누락 → date 기반으로 검색 진행");
-                } else {
-                    String reask = switch (intent) {
-                        case "학사공지" -> "학사공지에서 어떤 내용을 찾으시나요? 예: 휴학, 등록금 등 키워드를 입력해 주세요.";
-                        case "장학공지" -> "장학공지에서 어떤 내용을 찾으시나요? 예: 국가장학금, 교내장학금 등 키워드를 입력해 주세요.";
-                        case "한경공지" -> "한경공지에서 어떤 내용을 찾으시나요? 예: 행사, 모집 공고 등 키워드를 입력해 주세요.";
-                        case "학사일정" -> "어떤 학사일정을 찾으시나요? 예: 수강신청, 휴학 등 키워드를 입력해 주세요.";
-                        default -> "조금 더 구체적으로 어떤 정보를 찾으시는지 말씀해 주세요.";
-                    };
-                    return ResponseEntity.ok(new GptResponseDto(intent, reask));
-                }
+            if ((keyword == null || keyword.isBlank()) && !dateFilterApplied) {
+                String reask = switch (intent) {
+                    case "학사공지" -> "학사공지에서 어떤 내용을 찾으시나요? 예: 휴학, 등록금 등 키워드를 입력해 주세요.";
+                    case "장학공지" -> "장학공지에서 어떤 내용을 찾으시나요? 예: 국가장학금, 교내장학금 등 키워드를 입력해 주세요.";
+                    case "한경공지" -> "한경공지에서 어떤 내용을 찾으시나요? 예: 행사, 모집 공고 등 키워드를 입력해 주세요.";
+                    case "학사일정" -> "어떤 학사일정을 찾으시나요? 예: 수강신청, 휴학 등 키워드를 입력해 주세요.";
+                    default -> "조금 더 구체적으로 어떤 정보를 찾으시는지 말씀해 주세요.";
+                };
+                return ResponseEntity.ok(new GptResponseDto(intent, reask));
             }
         }
 
@@ -188,19 +163,16 @@ public class GptController {
             String noticeAnswer = tableQueryService.filterNoticeByConditions(
                     keyword, startDate, endDate, dateFilterApplied, dataList);
             response = new GptResponseDto(intent, noticeAnswer);
-
         } else if (SCHEDULE_INTENT.equals(intent)) {
-            keyword = normalizeKeyword(keyword); // 졸업/학위수여 동의어 처리
+            keyword = normalizeKeyword(keyword);
             List<?> dataList = tableQueryService.findNoticeDataByIntent(intent, null);
             String scheduleAnswer;
 
             if (keyword != null && !keyword.isBlank()) {
-                // keyword 우선 검색
                 scheduleAnswer = tableQueryService.filterAcademicScheduleByConditions(
                         keyword, null, null, false, dataList);
 
                 if (scheduleAnswer.isBlank()) {
-                    // fallback: 다른 날짜에 있을 경우 안내
                     String otherDate = tableQueryService.findKeywordInOtherDates(keyword, startDate, endDate);
                     if (!otherDate.isBlank()) {
                         scheduleAnswer = String.format(
@@ -211,14 +183,12 @@ public class GptController {
                     }
                 }
             } else if (dateFilterApplied) {
-                // keyword가 없을 경우 date 기반으로만 필터링
                 scheduleAnswer = tableQueryService.filterAcademicScheduleByConditions(
                         null, startDate, endDate, dateFilterApplied, dataList);
                 if (scheduleAnswer.isBlank()) {
                     scheduleAnswer = "요청하신 기간에는 학사일정이 없습니다.";
                 }
             } else {
-                // keyword도 없고 날짜도 없을 때
                 scheduleAnswer = "어떤 학사일정을 찾으시나요? 예: 수강신청, 휴학 등 키워드를 입력해 주세요.";
             }
 

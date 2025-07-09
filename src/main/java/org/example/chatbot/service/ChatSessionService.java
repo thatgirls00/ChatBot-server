@@ -18,6 +18,7 @@ public class ChatSessionService {
     private static final String FIELD_KEYWORD = "lastKeyword";
     private static final String FIELD_MEAL_TIME = "lastMealTime";
 
+    // 전체 저장용 (intent, date, keyword, mealTime)
     public void saveSession(String userId, String intent, String date, String keyword, String mealTime) {
         String key = buildKey(userId);
         redisTemplate.opsForHash().put(key, FIELD_INTENT, intent);
@@ -25,6 +26,11 @@ public class ChatSessionService {
         redisTemplate.opsForHash().put(key, FIELD_KEYWORD, keyword);
         redisTemplate.opsForHash().put(key, FIELD_MEAL_TIME, mealTime);
         redisTemplate.expire(key, Duration.ofMinutes(TTL_MINUTES));
+    }
+
+    // mealTime 없이 저장하는 경우를 위한 오버로드 버전
+    public void saveSession(String userId, String intent, String date, String keyword) {
+        saveSession(userId, intent, date, keyword, null);
     }
 
     public String getLastIntent(String userId) {

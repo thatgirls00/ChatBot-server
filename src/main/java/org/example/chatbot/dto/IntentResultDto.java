@@ -10,8 +10,6 @@ import lombok.NoArgsConstructor;
 public class IntentResultDto {
 
     private String intent;
-    private String date;
     private String keyword;
-    private String mealTime;
     private String answer;
 }
